@@ -20,6 +20,7 @@ dev = [
     "tomli-w",
     "chainlit",
     "streamlit",
+    "kafka-python>=2.2.7",
 ]
 
 [tool.uv]

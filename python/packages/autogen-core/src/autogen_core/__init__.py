@@ -42,6 +42,7 @@ from ._intervention import (
     DropMessage,
     InterventionHandler,
 )
+from ._kafka_agent_runtime import KafkaAgentRuntime
 from ._message_context import MessageContext
 from ._message_handler_context import MessageHandlerContext
 from ._routed_agent import RoutedAgent, event, message_handler, rpc
@@ -116,6 +117,7 @@ __all__ = [
     "JSON_DATA_CONTENT_TYPE",
     "PROTOBUF_DATA_CONTENT_TYPE",
     "SingleThreadedAgentRuntime",
+    "KafkaAgentRuntime",
     "ROOT_LOGGER_NAME",
     "EVENT_LOGGER_NAME",
     "TRACE_LOGGER_NAME",

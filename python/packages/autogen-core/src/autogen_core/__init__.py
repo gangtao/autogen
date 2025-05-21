@@ -43,6 +43,7 @@ from ._intervention import (
     InterventionHandler,
 )
 from ._kafka_agent_runtime import KafkaAgentRuntime
+from ._timeplus_agent_runtime import TimeplusAgentRuntime
 from ._message_context import MessageContext
 from ._message_handler_context import MessageHandlerContext
 from ._routed_agent import RoutedAgent, event, message_handler, rpc
@@ -118,6 +119,7 @@ __all__ = [
     "PROTOBUF_DATA_CONTENT_TYPE",
     "SingleThreadedAgentRuntime",
     "KafkaAgentRuntime",
+    "TimeplusAgentRuntime",
     "ROOT_LOGGER_NAME",
     "EVENT_LOGGER_NAME",
     "TRACE_LOGGER_NAME",

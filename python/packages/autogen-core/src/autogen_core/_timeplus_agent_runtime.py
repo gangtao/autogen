@@ -12,10 +12,8 @@ from dataclasses import asdict, dataclass
 from types import ModuleType
 from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, ParamSpec, Set, Type, TypeVar, cast
 
-from kafka import KafkaConsumer, KafkaProducer
-from kafka.admin import KafkaAdminClient, NewTopic
-from kafka.consumer.fetcher import ConsumerRecord
-from kafka.structs import TopicPartition
+from timeplus_messaging.producer import TimeplusLogProducer
+from timeplus_messaging.consumer import SingleTopicConsumer
 from opentelemetry.trace import TracerProvider
 
 from ._agent import Agent
@@ -50,7 +48,7 @@ type_func_alias = type
 
 
 @dataclass(kw_only=True)
-class KafkaMessageEnvelope:
+class TimeplusMessageEnvelope:
     message: Any
     sender: Optional[AgentId]
     topic_id: TopicId
@@ -82,7 +80,7 @@ class KafkaMessageEnvelope:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "KafkaMessageEnvelope":
+    def from_dict(cls, data: Dict[str, Any]) -> TimeplusMessageEnvelope:
         """Create an envelope from a dictionary."""
         if "sender" in data and data["sender"]:
             data["sender"] = AgentId.from_str(cast(str, data["sender"]))
@@ -122,7 +120,7 @@ T = TypeVar("T", bound=Agent)
 
 
 class RunContext:
-    def __init__(self, runtime: KafkaAgentRuntime) -> None:
+    def __init__(self, runtime: TimeplusAgentRuntime) -> None:
         self._runtime = runtime
         self._run_task = asyncio.create_task(self._run())
         self._stopped = asyncio.Event()
@@ -157,54 +155,50 @@ class RunContext:
         await self._ready.wait()
 
 
-class KafkaAgentRuntime(AgentRuntime):
+class TimeplusAgentRuntime(AgentRuntime):
     """ """
 
     def __init__(
         self,
-        bootstrap_servers: str = "localhost:9092",
-        group_id: str | None = None,
+        host: str = "localhost",
+        port: int = 8463,
+        user: str = "default",
+        password: str = "",
+        database: str = "default",
         *,
         intervention_handlers: List[InterventionHandler] | None = None,
         tracer_provider: TracerProvider | None = None,
         ignore_unhandled_exceptions: bool = True,
-        admin_client_kwargs: Dict[str, Any] | None = None,
-        consumer_kwargs: Dict[str, Any] | None = None,
-        producer_kwargs: Dict[str, Any] | None = None,
     ) -> None:
         self._tracer_helper = TraceHelper(tracer_provider, MessageRuntimeTracingConfig("SingleThreadedAgentRuntime"))
 
-        self._bootstrap_servers = bootstrap_servers
-        # Generate a unique group_id if not provided
-        self._group_id = group_id or f"autogen-{uuid.uuid4()}"
+        self._host = host
+        self._port = port
+        self._user = user
+        self._password = password
+        self._database = database
 
         # generate a unique topic name if not provided
-        self._runtime_topic = f"autogen-{uuid.uuid4()}"
-
-        producer_kwargs = producer_kwargs or {}
-        self._producer_kwargs = {"bootstrap_servers": bootstrap_servers, **producer_kwargs}
-
-        # Admin client for topic management
-        admin_kwargs = admin_client_kwargs or {}
-        self._admin_client: KafkaAdminClient = KafkaAdminClient(bootstrap_servers=bootstrap_servers, **admin_kwargs)
-
-        # Create the topic if it doesn't exist
-        try:
-            new_topics: List[NewTopic] = [NewTopic(name=self._runtime_topic, num_partitions=1, replication_factor=1)]
-            self._admin_client.create_topics(new_topics)  # type: ignore
-        except Exception as e:
-            logger.error(f"Error creating topic {self._runtime_topic}: {e}")
-
-        # Consumer kwargs for creating consumers
-        self._consumer_kwargs = consumer_kwargs or {}
-        self._consumer: KafkaConsumer = KafkaConsumer(
-            self._runtime_topic,
-            bootstrap_servers=self._bootstrap_servers,
-            auto_offset_reset="earliest",
-            enable_auto_commit=True,
-            group_id=self._group_id,
-            value_deserializer=lambda x: KafkaMessageEnvelope.from_dict(json.loads(x.decode("utf-8"))),
-        )
+        unique_topic_name = f"autogen_runtime_{uuid.uuid4()}".replace("-", "_")
+        self._runtime_topic = unique_topic_name
+        
+        self._topic_producer = TimeplusLogProducer(
+            host=self._host, 
+            port=self._port, 
+            user=self._user, 
+            password=self._password,
+            database=self._database)
+        
+        self._topic_producer._ensure_stream_exists(self._runtime_topic)
+        
+        self._consumer = SingleTopicConsumer(self._runtime_topic,
+            host=self._host, 
+            port=self._port, 
+            group_id="test_group", 
+            user=self._user, 
+            password=self._password,
+            database=self._database,
+            auto_offset_reset="earliest")
 
         # (namespace, type) -> List[AgentId]
         self._agent_factories: Dict[
@@ -312,7 +306,7 @@ class KafkaAgentRuntime(AgentRuntime):
             if cancellation_token is None:
                 cancellation_token = CancellationToken()
 
-            envelope = KafkaMessageEnvelope(
+            envelope = TimeplusMessageEnvelope(
                 message=message,
                 sender=sender,
                 topic_id=None,
@@ -321,12 +315,12 @@ class KafkaAgentRuntime(AgentRuntime):
                 message_id=message_id,
             )
 
-            # publish message to kafka topic
-            producer = KafkaProducer(**self._producer_kwargs)
+            # publish message to timeplus topic
+            producer = TimeplusLogProducer(host=self._host, port=self._port, user=self._user, password=self._password, database=self._database)
             producer.send(
                 topic=self._runtime_topic,
-                value=json.dumps(envelope.to_dict()).encode("utf-8"),
-                key=message_id.encode("utf-8"),
+                value=json.dumps(envelope.to_dict()),
+                key=message_id,
             )
 
             producer.flush()
@@ -367,7 +361,7 @@ class KafkaAgentRuntime(AgentRuntime):
                 )
             )
 
-            envelope = KafkaMessageEnvelope(
+            envelope = TimeplusMessageEnvelope(
                 message=message,
                 sender=sender,
                 topic_id=topic_id,
@@ -376,12 +370,12 @@ class KafkaAgentRuntime(AgentRuntime):
                 message_id=message_id,
             )
 
-            # TODO: publish message to kafka topic
-            producer = KafkaProducer(**self._producer_kwargs)
+            # TODO: publish message to timeplus topic
+            producer = TimeplusLogProducer(host=self._host, port=self._port, user=self._user, password=self._password, database=self._database)
             producer.send(
                 topic=self._runtime_topic,
-                value=json.dumps(envelope.to_dict()).encode("utf-8"),
-                key=message_id.encode("utf-8"),
+                value=json.dumps(envelope.to_dict()),
+                key=message_id,
             )
 
             producer.flush()
@@ -422,7 +416,7 @@ class KafkaAgentRuntime(AgentRuntime):
             if agent_id.type in self._known_agent_names:
                 await (await self._get_agent(agent_id)).load_state(state[str(agent_id)])
 
-    async def _process_send(self, envelope: KafkaMessageEnvelope) -> None:
+    async def _process_send(self, envelope: TimeplusMessageEnvelope) -> None:
         recipient = envelope.recipient
 
         if recipient is None:
@@ -471,7 +465,7 @@ class KafkaAgentRuntime(AgentRuntime):
                         envelope.message,
                         ctx=message_context,
                     )
-                    # TODO : handle response here, send to kafka topic as well
+                    # TODO : handle response here, send to timeplus topic as well
                     # print(f"recipient {recipient} for response: {response}")
         except BaseException as e:
             event_logger.info(
@@ -493,7 +487,7 @@ class KafkaAgentRuntime(AgentRuntime):
         )
         message_id = str(uuid.uuid4())
 
-        response_envelope = KafkaMessageEnvelope(
+        response_envelope = TimeplusMessageEnvelope(
             message=response,
             sender=envelope.recipient,
             topic_id=None,
@@ -502,17 +496,17 @@ class KafkaAgentRuntime(AgentRuntime):
             message_id=message_id,
         )
 
-        producer = KafkaProducer(**self._producer_kwargs)  # type: ignore
+        producer = TimeplusLogProducer(host=self._host, port=self._port, user=self._user, password=self._password, database=self._database)  # type: ignore
         producer.send(
             topic=self._runtime_topic,
-            value=json.dumps(response_envelope.to_dict()).encode("utf-8"),
-            key=message_id.encode("utf-8"),
+            value=json.dumps(response_envelope.to_dict()),
+            key=message_id,
         )
 
         producer.flush()
         producer.close()
 
-    async def _process_publish(self, message_envelope: KafkaMessageEnvelope) -> None:
+    async def _process_publish(self, message_envelope: TimeplusMessageEnvelope) -> None:
         with self._tracer_helper.trace_block("publish", message_envelope.topic_id, parent=message_envelope.metadata):
             try:
                 responses: List[Awaitable[Any]] = []
@@ -590,13 +584,20 @@ class KafkaAgentRuntime(AgentRuntime):
 
         try:
             # Poll for messages (e.g. wait up to 10 ms = 0.01 second)
-            records: Dict[TopicPartition, List[ConsumerRecord[str, KafkaMessageEnvelope]]] = self._consumer.poll(
+            records = self._consumer.poll(
                 timeout_ms=10
             )
+            
+            if not records:
+                return
+            
+            if records is not None:
+                logger.debug(f"get records {records}, type: {type(records)}")
 
             for _, messages in records.items():
                 for message in messages:
-                    envelope: KafkaMessageEnvelope = message.value
+                    envelope: TimeplusMessageEnvelope = TimeplusMessageEnvelope.from_dict(message.value)
+                    logger.debug(f"get the envelope: {envelope}")
                     recipient: AgentId | None = envelope.recipient
                     if recipient is not None:
                         await self._process_send(envelope)
@@ -604,7 +605,7 @@ class KafkaAgentRuntime(AgentRuntime):
                         await self._process_publish(envelope)
 
         except Exception as e:
-            logger.error(f"Error processing kafka message: {e}")
+            logger.error(f"Error processing Timeplus message: {e}")
 
         await asyncio.sleep(0)  # Yield control to the event loop
 

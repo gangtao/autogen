@@ -475,6 +475,7 @@ dependencies = [
     { name = "pillow" },
     { name = "protobuf" },
     { name = "pydantic" },
+    { name = "timeplus-messaging" },
     { name = "typing-extensions" },
 ]
 
@@ -533,6 +534,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=11.0.0" },
     { name = "protobuf", specifier = "~=5.29.3" },
     { name = "pydantic", specifier = ">=2.10.0,<3.0.0" },
+    { name = "timeplus-messaging", specifier = ">=0.0.1" },
     { name = "typing-extensions", specifier = ">=4.0.0" },
 ]
 
@@ -5713,6 +5715,42 @@ wheels = [
 ]
 
 [[package]]
+name = "proton-driver"
+version = "0.2.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytz" },
+    { name = "tzlocal" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/d3/e3020d92593e8bc1f88b8b34e04a7400eb7214c0fb20e7129bcc2081d90d/proton_driver-0.2.13-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:927b229c62ea09d611de473a6134fe2d761bd9b836edb6cc4285111d1d585b84", size = 212219 },
+    { url = "https://files.pythonhosted.org/packages/cf/a7/8bade16df2da4f032cad67e1c1ee671032f7c13c9136ca39b3bfb2a9f199/proton_driver-0.2.13-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:3f5c1493b348666cad2187827eeff53eba1d4d8a5c829af5d681f5858af56307", size = 208432 },
+    { url = "https://files.pythonhosted.org/packages/6f/00/556b5de8105acdcb4a383f39b8214e11c53b0bc98fdcdd496a7d49bf81ba/proton_driver-0.2.13-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:65cf3ee70669b8894ec9853e60ff0bf40d8d0cb4c94880f02705d4b1c1b76932", size = 896359 },
+    { url = "https://files.pythonhosted.org/packages/62/ef/bfdd34bfca2a08081a5e112979a5b3eb6d1adae51068328a7c8f5b0a3e21/proton_driver-0.2.13-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9f37f8bf2d50993458e2e65dd64a8fea522169ffc75bd351e2cca6be73d51f8f", size = 908441 },
+    { url = "https://files.pythonhosted.org/packages/c0/f2/3fc15424310548f0c15edeca374b16357a40faf37a667670b67bf4fd35f8/proton_driver-0.2.13-cp310-cp310-musllinux_1_1_aarch64.whl", hash = "sha256:92222633f042fcb0590ff7b766c9aac70ffbceb4b4fb095f7a7a1dd9cc5ee0dc", size = 912547 },
+    { url = "https://files.pythonhosted.org/packages/bb/5a/f712d773a6a1ee4778ceecdd3f8e0b7642569f192b6650f68ca65777a149/proton_driver-0.2.13-cp310-cp310-musllinux_1_1_x86_64.whl", hash = "sha256:2820aa1d30ee1a543eafaedd0b3315733f477acd6e3dab33cc18035866d5ccad", size = 924885 },
+    { url = "https://files.pythonhosted.org/packages/54/42/f04e311f309965c8777dd756b59b18b9acdefdb68b619ffd0f14cf62d156/proton_driver-0.2.13-cp310-cp310-win_amd64.whl", hash = "sha256:53e7307298cfebfe14dc1d9cf182009210eb5378a9f04609359edb3da1299c22", size = 206116 },
+    { url = "https://files.pythonhosted.org/packages/c3/2c/e7d9686be562c29b1b2a8217701cb95db1137d4b8a46b5cbe9b797ad6629/proton_driver-0.2.13-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:d69a54b7ae4952daecc99948859db09ed95c4d0b4afe7f8a020f3d5a3ec6fc7d", size = 213240 },
+    { url = "https://files.pythonhosted.org/packages/c5/4d/5727fb8bb052e0eee3c5ab032633a00aec00bcb594322ebc51ce2eadd255/proton_driver-0.2.13-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:d86dc89b49d3db514e9f8f7aa39dcec1525aa90b7b9b755a9e5335d8cee3fb91", size = 208875 },
+    { url = "https://files.pythonhosted.org/packages/2b/22/0743c8fb2c3872bd954d1a8bed0c41b624e9bf03e1ff48e0adbad50199f3/proton_driver-0.2.13-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:642b40713f4b7a2961ca8d2e73ff5eaaa8b84e15c1b997bbdff2d53a96c39b17", size = 979370 },
+    { url = "https://files.pythonhosted.org/packages/31/64/e6294d16e92fef193b569f81646074db8d5647b10157a0b9a41a35e6b1a8/proton_driver-0.2.13-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1ed47669df26bd20b44b100e7414b4593fa574540cde803602d957d6d80821e3", size = 987255 },
+    { url = "https://files.pythonhosted.org/packages/d5/f6/eaf5f5541417fc7bf8118811e447e4557ab0880dba6d5d1b08aec3d6c759/proton_driver-0.2.13-cp311-cp311-musllinux_1_1_aarch64.whl", hash = "sha256:5d38004df3ebc495e341db6aedfab435d80251e854441128dfb23299079cf4d9", size = 987531 },
+    { url = "https://files.pythonhosted.org/packages/31/b5/56cf6c47f9cd7deace8191293d975be7de52edcb6b16b43b88035b63630c/proton_driver-0.2.13-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:d2adc9edc686a3f1f211ce24c55146226b4e977f7889185625bc63a46266e3be", size = 996778 },
+    { url = "https://files.pythonhosted.org/packages/1e/87/67769f8c05d8533b86a4309f56b2c6e5ebbb04d6b22308905d35321e70fb/proton_driver-0.2.13-cp311-cp311-win_amd64.whl", hash = "sha256:5ffb6eb152001408279b7c12910c0031184f3a953efb87e9c7dee7ac6e167f8d", size = 206032 },
+    { url = "https://files.pythonhosted.org/packages/43/95/d27da28378cbd664c1a20879e190063945850532cf21c5cb91e6628dd297/proton_driver-0.2.13-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:658afdd6f6fad1139711f475795e3fcd30987f6b8fd9dfb351b88955e308af04", size = 213590 },
+    { url = "https://files.pythonhosted.org/packages/6e/8b/c949e8f553524d62bd938e6a06c97752d695915e9ef23ff9d36da4cf5e3a/proton_driver-0.2.13-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:7064dad75c92468e0f022cdfb4e9e8437e3107f03f94060ff71162e97585417a", size = 210377 },
+    { url = "https://files.pythonhosted.org/packages/cc/ae/ca7e6ea8590650c11fb68a6d57c16b9a57728609b24d85d5d3b83b99f36b/proton_driver-0.2.13-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:f8c76ea1d73ff777fd3fe1171ecda2e7222381c345e51b28f2cb907f959827c3", size = 986684 },
+    { url = "https://files.pythonhosted.org/packages/8c/0f/88509d045cc9ca6293f4bcae4bda353f7d8fc309b8d6ae76006232422afc/proton_driver-0.2.13-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b5a554474432afdd479d2154739b2bcfb2df710dba1af2f6f8f0097f69574744", size = 1000774 },
+    { url = "https://files.pythonhosted.org/packages/d7/c8/82aa8e172dd192feac18f75a306c9be5cc0cf422ec2e559367e02aabd038/proton_driver-0.2.13-cp312-cp312-musllinux_1_1_aarch64.whl", hash = "sha256:9cec474d50c52a466c9d6a2b959067c2bb14da5285c9c005f8aa5fb4d86ace83", size = 993828 },
+    { url = "https://files.pythonhosted.org/packages/7d/b1/16742b5718c9d545fc69520a1a97960dfce08202c88212d0e775e55eeaef/proton_driver-0.2.13-cp312-cp312-musllinux_1_1_x86_64.whl", hash = "sha256:5df31feef0ddca5ef0a4e5b3209dbff03e42c4cbb3ef1a5060a0e309e1760b42", size = 1007754 },
+    { url = "https://files.pythonhosted.org/packages/da/1f/8cc54ffde51dc90ead03a3200e86fb145de75b9d158b32cc9a8805f372d2/proton_driver-0.2.13-cp312-cp312-win_amd64.whl", hash = "sha256:ee03847fed069265e7164544b0651c6d771344fe9e6a7770222d5f6aa4efda5b", size = 205915 },
+    { url = "https://files.pythonhosted.org/packages/43/97/6cb39f0222e48249edc9cd05e9ddb310f9b58f302b669826477ccc95453c/proton_driver-0.2.13-pp310-pypy310_pp73-macosx_10_15_x86_64.whl", hash = "sha256:d3af480ee29eb6422d4d8b6dbf96d5eed8d6cacdaeca6ffd3f24ccd984328617", size = 192234 },
+    { url = "https://files.pythonhosted.org/packages/f6/7c/77241c5746d8f6e96859d6671fbc9d4b291a0f9ec11c5ee585a8d1d14b24/proton_driver-0.2.13-pp310-pypy310_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:2d4d6ccf9bb084505334a3d54d69d41432fc69d102576a25fb42b6b1643e4388", size = 212674 },
+    { url = "https://files.pythonhosted.org/packages/fc/d5/2d56df8104f7ca6872c97fce191904665f52665803a2e04c19ae8a6fafcb/proton_driver-0.2.13-pp310-pypy310_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:64a0f3f2bcbb047b4476c6fb9710246f88d383e43a11c76e54448f08c49f2655", size = 219828 },
+    { url = "https://files.pythonhosted.org/packages/36/99/6ca11afc3ef4504e405442ebf192ec32b56bd4be4e3bdb8086db9f42bb5a/proton_driver-0.2.13-pp310-pypy310_pp73-win_amd64.whl", hash = "sha256:e9bfe778ab17d575cf15293b5c15a524b2b4090158e707b87aec1e0a940c509f", size = 192401 },
+]
+
+[[package]]
 name = "psutil"
 version = "6.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -7574,6 +7612,18 @@ wheels = [
 ]
 
 [[package]]
+name = "timeplus-messaging"
+version = "0.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "proton-driver" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/94/ba/0c1557ebc65e651e1aba41714baf69a5501df863b94b3582acfaa6dcea39/timeplus_messaging-0.0.1.tar.gz", hash = "sha256:ba0d5bf4a7e897f82a02005e5c43077d8ea81bc2e91b29cabc500212ab9bf93d", size = 16277 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6e/ec/6285e04511f1d6ace93241e368160b4b3750f638c9d887afef00f8eaa448/timeplus_messaging-0.0.1-py3-none-any.whl", hash = "sha256:7eb7c39809c5118c3667f33dcd965a82ad054047a4bab439ac44b78f818889ca", size = 13262 },
+]
+
+[[package]]
 name = "tinysegmenter"
 version = "0.3"
 source = { registry = "https://pypi.org/simple" }
@@ -7959,6 +8009,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/43/0f/fa4723f22942480be4ca9527bbde8d43f6c3f2fe8412f00e7f5f6746bc8b/tzdata-2025.1.tar.gz", hash = "sha256:24894909e88cdb28bd1636c6887801df64cb485bd593f2fd83ef29075a81d694", size = 194950 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0f/dd/84f10e23edd882c6f968c21c2434fe67bd4a528967067515feca9e611e5e/tzdata-2025.1-py2.py3-none-any.whl", hash = "sha256:7e127113816800496f027041c570f50bcd464a020098a3b6b199517772303639", size = 346762 },
+]
+
+[[package]]
+name = "tzlocal"
+version = "5.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8b/2e/c14812d3d4d9cd1773c6be938f89e5735a1f11a9f184ac3639b93cef35d5/tzlocal-5.3.1.tar.gz", hash = "sha256:cceffc7edecefea1f595541dbd6e990cb1ea3d19bf01b2809f362a03dd7921fd", size = 30761 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c2/14/e2a54fabd4f08cd7af1c07030603c3356b74da07f7cc056e600436edfa17/tzlocal-5.3.1-py3-none-any.whl", hash = "sha256:eb1a66c3ef5847adf7a834f1be0800581b683b5608e74f86ecbcef8ab91bb85d", size = 18026 },
 ]
 
 [[package]]

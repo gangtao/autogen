@@ -45,6 +45,7 @@ from .exceptions import MessageDroppedException
 # Import Timeplus messaging components
 from timeplus_messaging.consumer import SingleTopicConsumer
 from timeplus_messaging.producer import TimeplusLogProducer
+from timeplus_messaging.admin import TimeplusAdmin
 
 logger = logging.getLogger("autogen_core")
 event_logger = logging.getLogger("autogen_core.events")
@@ -459,7 +460,11 @@ class SimplifiedTimeplusProducer:
         
     def _get_producer(self):
         """Get or create producer instance (reuse for better performance)"""
-        
+        #if self._producer is not None:  
+        #    return self._producer
+        # create a new producer every time to avoid simulatanous query 
+        # TODO: check how this should be fixed
+        #if self._producer is None: 
         self._producer = TimeplusLogProducer(
             host=self._host,
             port=self._port,
@@ -469,29 +474,20 @@ class SimplifiedTimeplusProducer:
         )
         return self._producer
     
-    def ensure_stream_exists(self, stream_name: str):
-        """Ensure stream exists using existing producer connection"""
-        if stream_name not in self._stream_created:
-            try:
-                producer = self._get_producer()
-                producer._ensure_stream_exists(stream_name)
-                self._stream_created.add(stream_name)
-                logger.info(f"[SIMPLE_PRODUCER] Stream '{stream_name}' created/verified")
-            except Exception as e:
-                logger.warning(f"[SIMPLE_PRODUCER] Stream creation warning for '{stream_name}': {e}")
-                # Mark as created anyway to avoid repeated attempts
-                self._stream_created.add(stream_name)
-    
     def send(self, topic: str, value: str, key: str = None):
         """Send message using existing producer connection"""
         try:
             producer = self._get_producer()
-            producer.send(topic=topic, value=value, key=key)
+            producer.send_sync(topic=topic, value=value, key=key)
             producer.flush()
+            #time.sleep(1)  # Ensure message is flushed before returning
             logger.debug(f"[SIMPLE_PRODUCER] Message sent successfully to {topic}")
         except Exception as e:
             logger.error(f"[SIMPLE_PRODUCER] Failed to send message: {e}")
             raise
+        finally:
+            #producer.client.disconnect()  # Ensure disconnect after sending
+            pass
     
     def close(self):
         """Close the producer"""
@@ -567,59 +563,6 @@ class SimplifiedTimeplusConsumer:
             self._consumer = None
 
 
-class SafeTimeplusConsumer:
-    """Consumer that creates fresh connections for polling to avoid conflicts"""
-    
-    def __init__(self, topic: str, host: str, port: int, group_id: str, user: str, password: str, database: str, auto_offset_reset: str = "latest"):
-        self._topic = topic
-        self._host = host
-        self._port = port
-        self._group_id = group_id
-        self._user = user
-        self._password = password
-        self._database = database
-        self._auto_offset_reset = auto_offset_reset
-        logger.info(f"[SAFE_CONSUMER] Initialized consumer wrapper for topic: {topic}")
-    
-    def _create_consumer(self):
-        """Create a fresh consumer instance"""
-        logger.debug(f"[SAFE_CONSUMER] Creating fresh consumer connection")
-        return SingleTopicConsumer(
-            topic=self._topic,
-            host=self._host,
-            port=self._port,
-            group_id=self._group_id,
-            user=self._user,
-            password=self._password,
-            database=self._database,
-            auto_offset_reset=self._auto_offset_reset
-        )
-    
-    def poll(self, timeout_ms: int = 100):
-        """Poll messages using a fresh consumer connection"""
-        consumer = None
-        try:
-            consumer = self._create_consumer()
-            records = consumer.poll(timeout_ms=timeout_ms)
-            logger.debug(f"[SAFE_CONSUMER] Polled {sum(len(msgs) for msgs in records.values()) if records else 0} messages")
-            return records
-        except Exception as e:
-            logger.error(f"[SAFE_CONSUMER] Poll failed: {e}")
-            raise
-        finally:
-            if consumer:
-                try:
-                    consumer.close()
-                    logger.debug(f"[SAFE_CONSUMER] Closed consumer connection")
-                except Exception as e:
-                    logger.debug(f"[SAFE_CONSUMER] Error closing consumer: {e}")
-    
-    def close(self):
-        """Nothing to close since we create fresh connections each time"""
-        logger.info(f"[SAFE_CONSUMER] Consumer wrapper closed")
-        pass
-
-
 P = ParamSpec("P")
 T = TypeVar("T", bound=Agent)
 
@@ -685,68 +628,6 @@ class RunContext:
         await asyncio.create_task(check_condition())
 
 
-class SafeTimeplusProducer:
-    """Wrapper around TimeplusLogProducer that avoids connection conflicts"""
-    
-    def __init__(self, host: str, port: int, user: str, password: str, database: str):
-        self._host = host
-        self._port = port  
-        self._user = user
-        self._password = password
-        self._database = database
-        self._producer = None
-        self._stream_created = set()  # Track which streams we've already created
-        
-    def _get_producer(self):
-        """Get or create producer instance"""
-        if self._producer is None:
-            self._producer = TimeplusLogProducer(
-                host=self._host,
-                port=self._port,
-                user=self._user,
-                password=self._password,
-                database=self._database
-            )
-        return self._producer
-    
-    def ensure_stream_exists(self, stream_name: str):
-        """Ensure stream exists, but only check once per stream"""
-        if stream_name not in self._stream_created:
-            try:
-                producer = self._get_producer()
-                producer._ensure_stream_exists(stream_name)
-                self._stream_created.add(stream_name)
-                logger.info(f"[SAFE_PRODUCER] Stream '{stream_name}' created/verified")
-            except Exception as e:
-                logger.warning(f"[SAFE_PRODUCER] Stream creation warning for '{stream_name}': {e}")
-                # Mark as created anyway to avoid repeated attempts
-                self._stream_created.add(stream_name)
-    
-    def send(self, topic: str, value: str, key: str = None):
-        """Send message without checking stream existence (assumes already created)"""
-        producer = self._get_producer()
-        # Use the raw send method that doesn't check stream existence
-        if hasattr(producer, '_send_raw'):
-            producer._send_raw(topic=topic, value=value, key=key)
-        else:
-            # Fallback to regular send, but stream should already exist
-            producer.send(topic=topic, value=value, key=key)
-    
-    def flush(self):
-        """Flush pending messages"""
-        if self._producer:
-            self._producer.flush()
-    
-    def close(self):
-        """Close the producer"""
-        if self._producer:
-            try:
-                self._producer.close()
-            except Exception as e:
-                logger.warning(f"[SAFE_PRODUCER] Error closing producer: {e}")
-            self._producer = None
-
-
 class TimeplusAgentRuntime(AgentRuntime):
     """
     A Timeplus-based agent runtime that processes messages through Timeplus streams.
@@ -793,6 +674,10 @@ class TimeplusAgentRuntime(AgentRuntime):
         
         # Generate unique stream name for this runtime
         self._stream_name = stream_name or f"autogen_runtime_{uuid.uuid4()}".replace("-", "_")
+        
+        admin = TimeplusAdmin(host=self._host, port=self._port, user=self._user, password=self._password, database=self._database)
+        admin.create_topic(self._stream_name, partitions=1)
+        
         logger.info(f"[RUNTIME] Initializing TimeplusAgentRuntime with stream: {self._stream_name}")
         
         # Initialize serialization with common autogen types
@@ -869,7 +754,6 @@ class TimeplusAgentRuntime(AgentRuntime):
                 
                 # Ensure stream exists ONCE during initialization (synchronous)
                 logger.info(f"[TIMEPLUS] Ensuring stream '{self._stream_name}' exists")
-                self._producer.ensure_stream_exists(self._stream_name)
                 
             except Exception as e:
                 logger.error(f"[TIMEPLUS] Failed to create producer: {e}")
@@ -1130,16 +1014,7 @@ class TimeplusAgentRuntime(AgentRuntime):
             def _send_message():
                 """Send message using simplified producer"""
                 try:
-                    logger.debug(f"[TIMEPLUS] Sending to stream {self._stream_name}")
-                    # create producer to avoid connection conflicts
-                    self._producer = SimplifiedTimeplusProducer(
-                        host=self._host,
-                        port=self._port,
-                        user=self._user,
-                        password=self._password,
-                        database=self._database
-                    )
-                    
+                    logger.debug(f"[TIMEPLUS] Sending to stream {self._stream_name}")                    
                     self._producer.send(
                         topic=self._stream_name,
                         value=envelope_json,

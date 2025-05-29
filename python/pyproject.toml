@@ -21,6 +21,7 @@ dev = [
     "chainlit",
     "streamlit",
     "kafka-python>=2.2.7",
+    "timeplus-messaging==0.0.2",
 ]
 
 [tool.uv]

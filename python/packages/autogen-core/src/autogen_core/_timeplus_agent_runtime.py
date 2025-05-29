@@ -12,9 +12,9 @@ from dataclasses import asdict, dataclass
 from types import ModuleType
 from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, ParamSpec, Set, Type, TypeVar, cast
 
-from timeplus_messaging.producer import TimeplusLogProducer
-from timeplus_messaging.consumer import SingleTopicConsumer
 from opentelemetry.trace import TracerProvider
+from timeplus_messaging.consumer import SingleTopicConsumer
+from timeplus_messaging.producer import TimeplusLogProducer
 
 from ._agent import Agent
 from ._agent_id import AgentId
@@ -47,6 +47,15 @@ event_logger = logging.getLogger("autogen_core.events")
 type_func_alias = type
 
 
+@dataclass
+class PendingRequest:
+    """Tracks pending RPC requests waiting for responses"""
+
+    future: asyncio.Future[Any]
+    original_sender: AgentId | None
+    timeout_task: asyncio.Task | None = None
+
+
 @dataclass(kw_only=True)
 class TimeplusMessageEnvelope:
     message: Any
@@ -55,6 +64,8 @@ class TimeplusMessageEnvelope:
     recipient: AgentId | None
     metadata: Optional[EnvelopeMetadata] = None
     message_id: str
+    is_response: bool = False  # Mark response messages
+    is_error: bool = False  # Mark error responses
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -68,15 +79,17 @@ class TimeplusMessageEnvelope:
         if self.recipient:
             data["recipient"] = str(self.recipient)
 
+        # CRITICAL FIX: Improve message serialization
         if hasattr(self.message, "__dict__"):
             data["message"] = {
                 "_type": type(self.message).__name__,
                 "_module": type(self.message).__module__,
                 "_content": self.message.__dict__,
             }
-        elif not isinstance(self.message, (str, int, float, bool, list, dict, type(None))):
+        elif isinstance(self.message, (str, int, float, bool, list, dict, type(None))):
+            data["message"] = self.message
+        else:
             data["message"] = str(self.message)
-
         return data
 
     @classmethod
@@ -102,17 +115,37 @@ class TimeplusMessageEnvelope:
                 module = cast(ModuleType, __import__(module_name, fromlist=["*"]))
                 cls_type = cast(Type[Any], getattr(module, class_name))
 
-                obj = cls_type.__new__(cls_type)
+                # CRITICAL FIX: Use proper object construction
+                try:
+                    # Try to create object with the content as kwargs
+                    obj = cls_type(**content)
+                except TypeError:
+                    # Fallback: create empty object and set attributes
+                    obj = cls_type.__new__(cls_type)
+                    # Call __init__ if it exists and can be called without args
+                    if hasattr(obj, "__init__"):
+                        try:
+                            obj.__init__()
+                        except TypeError:
+                            pass  # __init__ requires arguments we don't have
 
-                for key, value in content.items():
-                    setattr(obj, key, value)
+                    # Set the attributes
+                    for key, value in content.items():
+                        setattr(obj, key, value)
 
                 data["message"] = obj
 
             except (ImportError, AttributeError, TypeError, ValueError):
                 data["message"] = message["_content"]
+        else:
+            logger.debug(f"🔍 Message is not structured, keeping as-is: {message}")
 
-        return cls(**data)
+        # Handle missing fields for backward compatibility
+        data.setdefault("is_response", False)
+        data.setdefault("is_error", False)
+
+        result = cls(**data)
+        return result
 
 
 P = ParamSpec("P")
@@ -181,24 +214,23 @@ class TimeplusAgentRuntime(AgentRuntime):
         # generate a unique topic name if not provided
         unique_topic_name = f"autogen_runtime_{uuid.uuid4()}".replace("-", "_")
         self._runtime_topic = unique_topic_name
-        
+
         self._topic_producer = TimeplusLogProducer(
-            host=self._host, 
-            port=self._port, 
-            user=self._user, 
-            password=self._password,
-            database=self._database)
-        
+            host=self._host, port=self._port, user=self._user, password=self._password, database=self._database
+        )
+
         self._topic_producer._ensure_stream_exists(self._runtime_topic)
-        
-        self._consumer = SingleTopicConsumer(self._runtime_topic,
-            host=self._host, 
-            port=self._port, 
-            group_id="test_group", 
-            user=self._user, 
+
+        self._consumer = SingleTopicConsumer(
+            self._runtime_topic,
+            host=self._host,
+            port=self._port,
+            group_id="test_group",
+            user=self._user,
             password=self._password,
             database=self._database,
-            auto_offset_reset="earliest")
+            auto_offset_reset="earliest",
+        )
 
         # (namespace, type) -> List[AgentId]
         self._agent_factories: Dict[
@@ -213,6 +245,9 @@ class TimeplusAgentRuntime(AgentRuntime):
         self._ignore_unhandled_handler_exceptions = ignore_unhandled_exceptions
         self._background_exception: BaseException | None = None
         self._agent_instance_types: Dict[str, Type[Agent]] = {}
+
+        self._pending_requests: Dict[str, PendingRequest] = {}
+        self._request_timeout = 30.0  # seconds
 
     @property
     def unprocessed_messages_count(
@@ -283,9 +318,22 @@ class TimeplusAgentRuntime(AgentRuntime):
         cancellation_token: CancellationToken | None = None,
         message_id: str | None = None,
     ) -> Any:
-        # print(f"Sending message to {recipient} from {sender}")
+        logger.debug(f"send_message from  recipient {recipient}: {message}")
         if message_id is None:
             message_id = str(uuid.uuid4())
+
+        # Create future for the response
+        future = asyncio.get_event_loop().create_future()
+
+        # Set up timeout
+        timeout_task = asyncio.create_task(self._timeout_request(message_id, self._request_timeout))
+
+        # Store pending request
+        self._pending_requests[message_id] = PendingRequest(
+            future=future, original_sender=sender, timeout_task=timeout_task
+        )
+
+        logger.debug(f"all pending request {self._pending_requests}")
 
         event_logger.info(
             MessageEvent(
@@ -297,34 +345,47 @@ class TimeplusAgentRuntime(AgentRuntime):
             )
         )
 
-        with self._tracer_helper.trace_block(
-            "create",
-            recipient,
-            parent=None,
-            extraAttributes={"message_type": type(message).__name__},
-        ):
-            if cancellation_token is None:
-                cancellation_token = CancellationToken()
+        envelope = TimeplusMessageEnvelope(
+            message=message,
+            sender=sender,
+            topic_id=None,
+            recipient=recipient,
+            metadata=get_telemetry_envelope_metadata(),
+            message_id=message_id,
+        )
 
-            envelope = TimeplusMessageEnvelope(
-                message=message,
-                sender=sender,
-                topic_id=None,
-                recipient=recipient,
-                metadata=get_telemetry_envelope_metadata(),
-                message_id=message_id,
-            )
+        # Publish to Timeplus
+        producer = TimeplusLogProducer(
+            host=self._host, port=self._port, user=self._user, password=self._password, database=self._database
+        )
+        producer.send(
+            topic=self._runtime_topic,
+            value=json.dumps(envelope.to_dict()),
+            key=message_id,
+        )
+        producer.flush()
+        producer.close()
 
-            # publish message to timeplus topic
-            producer = TimeplusLogProducer(host=self._host, port=self._port, user=self._user, password=self._password, database=self._database)
-            producer.send(
-                topic=self._runtime_topic,
-                value=json.dumps(envelope.to_dict()),
-                key=message_id,
-            )
+        # Link cancellation token if provided
+        if cancellation_token:
+            cancellation_token.link_future(future)
 
-            producer.flush()
-            producer.close()
+        logger.debug(f"wait response from  recipient {recipient}")
+
+        response = await future
+
+        logger.debug(f"got response from  recipient {recipient}")
+        # Wait for response
+        return response
+
+    async def _timeout_request(self, message_id: str, timeout: float) -> None:
+        """Handle request timeout"""
+        await asyncio.sleep(timeout)
+
+        if message_id in self._pending_requests:
+            pending = self._pending_requests.pop(message_id)
+            if not pending.future.done():
+                pending.future.set_exception(TimeoutError(f"Request {message_id} timed out after {timeout} seconds"))
 
     async def publish_message(
         self,
@@ -335,7 +396,7 @@ class TimeplusAgentRuntime(AgentRuntime):
         cancellation_token: CancellationToken | None = None,
         message_id: str | None = None,
     ) -> None:
-        # print(f"publish message to {topic_id} from {sender}")
+        logger.debug(f"publish message to {topic_id} from {sender}")
 
         with self._tracer_helper.trace_block(
             "create",
@@ -371,7 +432,9 @@ class TimeplusAgentRuntime(AgentRuntime):
             )
 
             # TODO: publish message to timeplus topic
-            producer = TimeplusLogProducer(host=self._host, port=self._port, user=self._user, password=self._password, database=self._database)
+            producer = TimeplusLogProducer(
+                host=self._host, port=self._port, user=self._user, password=self._password, database=self._database
+            )
             producer.send(
                 topic=self._runtime_topic,
                 value=json.dumps(envelope.to_dict()),
@@ -417,13 +480,16 @@ class TimeplusAgentRuntime(AgentRuntime):
                 await (await self._get_agent(agent_id)).load_state(state[str(agent_id)])
 
     async def _process_send(self, envelope: TimeplusMessageEnvelope) -> None:
+        logger.debug(f"process send envelope: {envelope}")
+        print(f"process send envelope: {envelope}")
         recipient = envelope.recipient
 
         if recipient is None:
+            logger.error(f"Recipient is None in _process_send for envelope: {envelope}")
+            if envelope.sender:  # If there's an original sender, notify them of the error
+                err = ValueError("Recipient was None for a direct message, cannot process.")
+                await self._send_error_response(original_envelope=envelope, error=err)
             return
-
-        if recipient.type not in self._known_agent_names:
-            raise LookupError(f"Agent type '{recipient.type}' does not exist.")
 
         try:
             sender_id = str(envelope.sender) if envelope.sender is not None else "Unknown"
@@ -439,16 +505,24 @@ class TimeplusAgentRuntime(AgentRuntime):
                     delivery_stage=DeliveryStage.DELIVER,
                 )
             )
-            recipient_agent = await self._get_agent(recipient)
+
+            # Ensure agent type exists before trying to get/create agent
+            if recipient.type not in self._known_agent_names:  # _known_agent_names check
+                raise LookupError(f"Agent type '{recipient.type}' does not exist.")
+
+            recipient_agent = await self._get_agent(recipient)  # Can raise LookupError if agent_id not found by factory
+            
+            print(f"get recipient agent: {recipient_agent}")
 
             message_context = MessageContext(
                 sender=envelope.sender,
-                topic_id=None,
-                is_rpc=True,
+                topic_id=None,  # Direct message, not via a topic subscription
+                is_rpc=True,  # Direct send implies a request-response pattern
                 message_id=envelope.message_id,
-                cancellation_token=None,
+                cancellation_token=None,  # TODO: Consider how to propagate CancellationToken if needed
             )
 
+            actual_response_data = None  # Initialize
             with self._tracer_helper.trace_block(
                 "process",
                 recipient_agent.id,
@@ -460,49 +534,158 @@ class TimeplusAgentRuntime(AgentRuntime):
                     message=envelope.message,
                 ),
             ):
-                with MessageHandlerContext.populate_context(recipient_agent.id):
-                    response = await recipient_agent.on_message(
+                with MessageHandlerContext.populate_context(recipient_agent.id):  #
+                    logger.debug(
+                        f"recipient {recipient} ({recipient_agent}) for message: {envelope.message}, type: {type(envelope.message)}"
+                    )
+                    print(f"wait agent response: {recipient_agent} for message: {envelope.message}, type: {type(envelope.message)}")    
+                    actual_response_data = await recipient_agent.on_message(
                         envelope.message,
                         ctx=message_context,
                     )
-                    # TODO : handle response here, send to timeplus topic as well
-                    # print(f"recipient {recipient} for response: {response}")
+                    print(f"agent  response: {actual_response_data}")
+                    logger.debug(f"get response from agent {recipient} ({recipient_agent}): {actual_response_data}")
+
+            
+            # If recipient_agent.on_message completed successfully:
+            event_logger.info(
+                MessageEvent(
+                    payload=self._try_serialize(actual_response_data),
+                    sender=envelope.recipient,  # The agent that handled the message is now the sender of the response
+                    receiver=envelope.sender,  # The original sender is the recipient of the response
+                    kind=MessageKind.RESPOND,
+                    delivery_stage=DeliveryStage.SEND,
+                )
+            )
+            logger.debug(
+                f"################## sending successful response: {actual_response_data} for original envelope: {envelope}"
+            )
+            print(f"################## sending response: {actual_response_data} for original envelope: {envelope}") 
+            await self._send_response(original_envelope=envelope, response=actual_response_data)
+
         except BaseException as e:
+            # This catches exceptions from _get_agent, recipient_agent.on_message, or LookupError for unknown type
+            logger.error(
+                f"Exception in _process_send for recipient {recipient} processing envelope {envelope.message_id}: {e}",
+                exc_info=True,
+            )
             event_logger.info(
                 MessageHandlerExceptionEvent(
-                    payload=self._try_serialize(envelope.message),
-                    handling_agent=recipient,
+                    payload=self._try_serialize(envelope.message),  # Original message payload
+                    handling_agent=recipient,  # The agent that was supposed to handle
                     exception=e,
                 )
             )
-
-        event_logger.info(
-            MessageEvent(
-                payload=self._try_serialize(response),
-                sender=envelope.recipient,
-                receiver=envelope.sender,
-                kind=MessageKind.RESPOND,
-                delivery_stage=DeliveryStage.SEND,
+            # Send an error response back to the original sender
+            logger.debug(
+                f"################## sending error response for exception: {e} for original envelope: {envelope}"
             )
-        )
-        message_id = str(uuid.uuid4())
+            await self._send_error_response(original_envelope=envelope, error=e)
+
+    async def _send_response(self, original_envelope: TimeplusMessageEnvelope, response: Any) -> None:
+        """Send a successful response back to the original sender"""
+        if original_envelope.sender is None:
+            return  # No one to respond to
 
         response_envelope = TimeplusMessageEnvelope(
             message=response,
-            sender=envelope.recipient,
+            sender=original_envelope.recipient,
             topic_id=None,
-            recipient=envelope.sender,
+            recipient=original_envelope.sender,
             metadata=get_telemetry_envelope_metadata(),
-            message_id=message_id,
+            message_id=original_envelope.message_id,  # Use same message_id for correlation
+            is_response=True,  # Add this field to identify responses
         )
 
-        producer = TimeplusLogProducer(host=self._host, port=self._port, user=self._user, password=self._password, database=self._database)  # type: ignore
+        logger.debug(f"###################### send response envelope: {response_envelope}")
+
+        await self._publish_envelope(response_envelope)
+
+    async def _send_error_response(self, original_envelope: TimeplusMessageEnvelope, error: BaseException) -> None:
+        """Send an error response back to the original sender"""
+        if original_envelope.sender is None:
+            return
+
+        # Create a serializable error representation
+        error_response = {"error_type": type(error).__name__, "error_message": str(error), "is_error": True}
+
+        response_envelope = TimeplusMessageEnvelope(
+            message=error_response,
+            sender=original_envelope.recipient,
+            topic_id=None,
+            recipient=original_envelope.sender,
+            metadata=get_telemetry_envelope_metadata(),
+            message_id=original_envelope.message_id,
+            is_response=True,
+            is_error=True,  # Add this field
+        )
+
+        await self._publish_envelope(response_envelope)
+
+    async def _process_response(self, envelope: TimeplusMessageEnvelope) -> None:
+        """Process a response message by resolving the corresponding future"""
+        message_id = envelope.message_id
+
+        logger.debug(f"Processing response for message_id: {message_id}")
+
+        if message_id not in self._pending_requests:
+            logger.warning(f"Received response for unknown request: {message_id}")
+            return
+
+        pending = self._pending_requests.pop(message_id)
+
+        # Cancel timeout task
+        if pending.timeout_task and not pending.timeout_task.done():
+            pending.timeout_task.cancel()
+
+        if pending.future.done():
+            logger.warning(f"Received response for already completed request: {message_id}")
+            return
+
+        # Handle error responses (check the actual value, not attribute existence)
+        if envelope.is_error:
+            logger.debug(f"Processing error response for {message_id}")
+            error_data = envelope.message
+            if isinstance(error_data, dict) and error_data.get("is_error"):
+                error_type = error_data.get("error_type", "RemoteError")
+                error_message = error_data.get("error_message", "Unknown error")
+
+                # Create appropriate exception
+                if error_type == "LookupError":
+                    exception = LookupError(error_message)
+                elif error_type == "TimeoutError":
+                    exception = TimeoutError(error_message)
+                else:
+                    exception = RuntimeError(f"{error_type}: {error_message}")
+
+                pending.future.set_exception(exception)
+            else:
+                pending.future.set_exception(RuntimeError("Unknown error format"))
+        else:
+            # Successful response
+            logger.debug(f"Processing successful response for {message_id}")
+            pending.future.set_result(envelope.message)
+
+        event_logger.info(
+            MessageEvent(
+                payload=self._try_serialize(envelope.message),
+                sender=envelope.sender,
+                receiver=envelope.recipient,
+                kind=MessageKind.RESPOND,
+                delivery_stage=DeliveryStage.DELIVER,
+            )
+        )
+
+    async def _publish_envelope(self, envelope: TimeplusMessageEnvelope) -> None:
+        """Helper method to publish an envelope to Timeplus"""
+        producer = TimeplusLogProducer(
+            host=self._host, port=self._port, user=self._user, password=self._password, database=self._database
+        )
         producer.send(
             topic=self._runtime_topic,
-            value=json.dumps(response_envelope.to_dict()),
-            key=message_id,
+            value=json.dumps(envelope.to_dict()),
+            key=envelope.message_id,
         )
-
         producer.flush()
         producer.close()
 
@@ -571,43 +754,61 @@ class TimeplusAgentRuntime(AgentRuntime):
                                     )
                                     raise e
 
-                    future = _on_message(agent, message_context)
-                    responses.append(future)
-
-                await asyncio.gather(*responses)
+                    response = await _on_message(agent, message_context)
+                    responses.append(response)
             except BaseException as e:
                 if not self._ignore_unhandled_handler_exceptions:
                     self._background_exception = e
 
-    async def _process_next(self) -> None:  # type: ignore
-        """Process the next message in the queue."""
+    async def _process_next(self) -> None:
+        """Enhanced process_next to handle responses"""
+
+        if self._background_exception is not None:
+            e = self._background_exception
+            self._background_exception = None
+            raise e
 
         try:
-            # Poll for messages (e.g. wait up to 10 ms = 0.01 second)
-            records = self._consumer.poll(
-                timeout_ms=10
-            )
-            
+            records = self._consumer.poll(timeout_ms=10)
+
             if not records:
                 return
-            
-            if records is not None:
-                logger.debug(f"get records {records}, type: {type(records)}")
+
+            print(f"###################### get records: {records}")
 
             for _, messages in records.items():
                 for message in messages:
                     envelope: TimeplusMessageEnvelope = TimeplusMessageEnvelope.from_dict(message.value)
-                    logger.debug(f"get the envelope: {envelope}")
-                    recipient: AgentId | None = envelope.recipient
-                    if recipient is not None:
-                        await self._process_send(envelope)
+                    logger.info(f"Processing envelope: {envelope}")
+
+                    # Check if this is a response message (check the actual value, not just attribute existence)
+                    task: Optional[asyncio.Task] = None
+                    if envelope.is_response:
+                        logger.info(f"Processing response message: {envelope.message_id}")
+                        #await self._process_response(envelope)
+                        task = asyncio.create_task(self._process_response(envelope))
+                        
+                    elif envelope.recipient is not None:
+                        # Direct message (send)
+                        logger.info(f"Processing direct message to {envelope.recipient}")
+                        #await self._process_send(envelope)
+                        task = asyncio.create_task(self._process_send(envelope))
                     else:
-                        await self._process_publish(envelope)
+                        # Publish message (no specific recipient, has topic_id)
+                        logger.info(f"Processing publish message to topic {envelope.topic_id}")
+                        print(f"Processing publish message to topic {envelope.topic_id}")
+                        task = asyncio.create_task(self._process_publish(envelope))
+                        
+                    if task is not None:
+                        self._background_tasks.add(task)
+                        task.add_done_callback(self._background_tasks.discard)
 
         except Exception as e:
-            logger.error(f"Error processing Timeplus message: {e}")
+            logger.error(f"Error processing Timeplus message: {e}", exc_info=True)
+            if not self._ignore_unhandled_handler_exceptions:
+                self._background_exception = e
 
-        await asyncio.sleep(0)  # Yield control to the event loop
+        await asyncio.sleep(0)
 
     def start(self) -> None:
         """Start the runtime message processing loop. This runs in a background task.
@@ -637,16 +838,18 @@ class TimeplusAgentRuntime(AgentRuntime):
         self._run_context = RunContext(self)
 
     async def close(self) -> None:
-        """Calls :meth:`stop` if applicable and the :meth:`Agent.close` method on all instantiated agents"""
-        # stop the runtime if it hasn't been stopped yet
-        if self._run_context is not None:
-            await self.stop()
-        # close all the agents that have been instantiated
-        for agent_id in self._instantiated_agents:
-            agent = await self._get_agent(agent_id)
-            await agent.close()
+        """Enhanced close method to cleanup pending requests"""
+        # Cancel all pending requests
+        for _, pending in self._pending_requests.items():
+            if pending.timeout_task and not pending.timeout_task.done():
+                pending.timeout_task.cancel()
+            if not pending.future.done():
+                pending.future.set_exception(RuntimeError("Runtime is shutting down"))
 
-        self._consumer.close()  # type: ignore
+        self._pending_requests.clear()
+
+        # Call parent close
+        await super().close()
 
     async def stop(self) -> None:
         """Immediately stop the runtime message processing loop. The currently processing message will be completed, but all others following it will be discarded."""

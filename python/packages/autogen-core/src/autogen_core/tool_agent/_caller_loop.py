@@ -36,11 +36,15 @@ async def tool_agent_caller_loop(
     """
 
     generated_messages: List[LLMMessage] = []
-
+    print(f"call model in tool loop")
     # Get a response from the model.
     response = await model_client.create(input_messages, tools=tool_schema, cancellation_token=cancellation_token)
+    
+    print(f"Got response in tool loop")
     # Add the response to the generated messages.
     generated_messages.append(AssistantMessage(content=response.content, source=caller_source))
+    
+    print(f"tool generated messages for response {response}")
 
     # Keep iterating until the model stops generating tool calls.
     while isinstance(response.content, list) and all(isinstance(item, FunctionCall) for item in response.content):
@@ -56,6 +60,7 @@ async def tool_agent_caller_loop(
             ],
             return_exceptions=True,
         )
+
         # Combine the results into a single response and handle exceptions.
         function_results: List[FunctionExecutionResult] = []
         for result in results:

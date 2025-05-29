@@ -486,8 +486,8 @@ class SimplifiedTimeplusProducer:
             logger.error(f"[SIMPLE_PRODUCER] Failed to send message: {e}")
             raise
         finally:
-            #producer.client.disconnect()  # Ensure disconnect after sending
-            pass
+            producer.client.disconnect()  # Ensure disconnect after sending
+
     
     def close(self):
         """Close the producer"""
@@ -921,8 +921,9 @@ class TimeplusAgentRuntime(AgentRuntime):
                 if message_id in self._pending_requests:
                     logger.warning(f"[MESSAGE] Request {message_id} timed out")
                     self._pending_requests.pop(message_id)
-                    if not future.done():
-                        future.set_exception(TimeoutError(f"Request {message_id} timed out"))
+                    # TODO : disable timeout exception temporarily
+                    #if not future.done():
+                    #    future.set_exception(TimeoutError(f"Request {message_id} timed out"))
             
             pending_request.timeout_task = asyncio.create_task(timeout_handler())
             self._pending_requests[message_id] = pending_request

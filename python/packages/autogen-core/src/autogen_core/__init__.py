@@ -42,7 +42,7 @@ from ._intervention import (
     DropMessage,
     InterventionHandler,
 )
-from ._kafka_agent_runtime import KafkaAgentRuntime
+
 from ._message_context import MessageContext
 from ._message_handler_context import MessageHandlerContext
 from ._routed_agent import RoutedAgent, event, message_handler, rpc
@@ -60,7 +60,7 @@ from ._serialization import (
 from ._single_threaded_agent_runtime import SingleThreadedAgentRuntime
 from ._subscription import Subscription
 from ._subscription_context import SubscriptionInstantiationContext
-from ._timeplus_agent_runtime_claude import TimeplusAgentRuntime
+from ._timeplus_agent_runtime import TimeplusAgentRuntime
 from ._topic import TopicId
 from ._type_prefix_subscription import TypePrefixSubscription
 from ._type_subscription import TypeSubscription

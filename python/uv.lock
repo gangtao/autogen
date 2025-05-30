@@ -55,7 +55,7 @@ dev = [
     { name = "rich" },
     { name = "ruff", specifier = "==0.4.8" },
     { name = "streamlit" },
-    { name = "timeplus-messaging", specifier = "==0.0.2" },
+    { name = "timeplus-messaging", specifier = "==0.0.3" },
     { name = "tomli" },
     { name = "tomli-w" },
     { name = "typer" },
@@ -7614,14 +7614,14 @@ wheels = [
 
 [[package]]
 name = "timeplus-messaging"
-version = "0.0.2"
+version = "0.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "proton-driver" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/97/11/ce5a182b5eb82547f1362899e1d534a9739cb0aab5b56766030403d51c1e/timeplus_messaging-0.0.2.tar.gz", hash = "sha256:7a414193c316a585683ecae49e148c82188350c7aa5c0bf902557f49ed28aa18", size = 16139 }
+sdist = { url = "https://files.pythonhosted.org/packages/8f/2f/8f1a59f29c6dee1050d9efc0034fb0863edee49a222b03f1d232644d12ce/timeplus_messaging-0.0.3.tar.gz", hash = "sha256:9799507fc54a45510ed16094f3c6d738723e5c9f42e0fdeebb511601bce5f0ed", size = 16161 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/d1/209e6ada6ae67ad39a5f92ba17bfbbd7181f7cf72490549ba88db1d41964/timeplus_messaging-0.0.2-py3-none-any.whl", hash = "sha256:19b57254df7b521813e5c86315f3c0ee45b0d6dfc5281b958da42f72413f9639", size = 13808 },
+    { url = "https://files.pythonhosted.org/packages/74/fa/1f170f900f8b3285d74f5c9c3265e5358571b78c15bd92a18dd6d2d22ca4/timeplus_messaging-0.0.3-py3-none-any.whl", hash = "sha256:e603467d7e692f8cd9152cddf36b38bd6fc00f0d446369401bb71b262cabcd14", size = 13839 },
 ]
 
 [[package]]
